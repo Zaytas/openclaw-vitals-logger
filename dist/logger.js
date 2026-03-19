@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, renameSync, copyFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, copyFileSync, mkdirSync, existsSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { safeJsonParse, resolvePath } from './utils.js';
 // In-memory mutex for single-process write safety
@@ -88,7 +88,6 @@ function atomicWrite(filePath, data, log) {
         // Clean up temp file if rename failed
         try {
             if (existsSync(tmpFile)) {
-                const { unlinkSync } = require('node:fs');
                 unlinkSync(tmpFile);
             }
         }

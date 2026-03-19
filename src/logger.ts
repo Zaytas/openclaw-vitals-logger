@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, renameSync, copyFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, copyFileSync, mkdirSync, existsSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { Activity, VitalsData } from './types.js';
@@ -99,7 +99,6 @@ function atomicWrite(filePath: string, data: string, log: Logger): void {
     // Clean up temp file if rename failed
     try {
       if (existsSync(tmpFile)) {
-        const { unlinkSync } = require('node:fs');
         unlinkSync(tmpFile);
       }
     } catch { /* ignore cleanup errors */ }

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { homedir } from 'node:os';
 const PREFIX = '[vitals-logger]';
 export function generateActivityId() {
     const timestamp = Date.now().toString(36);
@@ -85,7 +86,7 @@ export function safeJsonParse(text) {
 }
 export function resolvePath(filePath) {
     if (filePath.startsWith('~')) {
-        const home = process.env.HOME || process.env.USERPROFILE || '/home/node';
+        const home = process.env.HOME || process.env.USERPROFILE || homedir();
         return filePath.replace(/^~/, home);
     }
     return filePath;

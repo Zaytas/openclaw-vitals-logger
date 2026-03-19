@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { homedir } from 'node:os';
 
 const PREFIX = '[vitals-logger]';
 
@@ -93,7 +94,7 @@ export function safeJsonParse<T>(text: string): T | undefined {
 
 export function resolvePath(filePath: string): string {
   if (filePath.startsWith('~')) {
-    const home = process.env.HOME || process.env.USERPROFILE || '/home/node';
+    const home = process.env.HOME || process.env.USERPROFILE || homedir();
     return filePath.replace(/^~/, home);
   }
   return filePath;

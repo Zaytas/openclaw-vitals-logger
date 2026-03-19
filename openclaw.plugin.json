@@ -1,0 +1,72 @@
+{
+  "name": "vitals-logger",
+  "version": "1.0.0",
+  "description": "Automatically detects and logs physical activities from chat messages to a JSON file",
+  "main": "dist/index.js",
+  "hooks": ["before_prompt_build"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": { "type": "boolean", "default": true, "description": "Enable or disable the plugin" },
+      "channels": { "type": "array", "items": { "type": "string" }, "default": ["signal"], "description": "Channels to monitor" },
+      "dataFile": { "type": "string", "default": "~/.openclaw/workspace/data/vitals.json", "description": "Path to vitals JSON file" },
+      "timezone": { "type": "string", "default": "UTC", "description": "IANA timezone for date resolution" },
+      "activityTypes": { "type": "array", "items": { "type": "string" }, "default": ["walking", "cycling", "running", "swimming", "weights", "yoga", "pickleball", "hiking", "other"] },
+      "extraction": {
+        "type": "object", "additionalProperties": false,
+        "properties": {
+          "model": { "type": "string", "default": "google/gemini-2.0-flash" },
+          "maxTokens": { "type": "number", "default": 500 },
+          "timeout": { "type": "number", "default": 10000 }
+        }
+      },
+      "dedup": {
+        "type": "object", "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "windowDays": { "type": "number", "default": 1 },
+          "confirmDuplicates": { "type": "boolean", "default": true },
+          "durationTolerancePercent": { "type": "number", "default": 20 },
+          "distanceTolerancePercent": { "type": "number", "default": 20 },
+          "pendingExpireMinutes": { "type": "number", "default": 10 }
+        }
+      },
+      "confirmation": {
+        "type": "object", "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "style": { "type": "string", "enum": ["inline", "brief"], "default": "inline" }
+        }
+      },
+      "preGate": {
+        "type": "object", "additionalProperties": false,
+        "properties": {
+          "minMessageLength": { "type": "number", "default": 10 },
+          "scoreThreshold": { "type": "number", "default": 4 },
+          "activityNouns": { "type": "array", "items": { "type": "string" }, "default": [] },
+          "activityVerbs": { "type": "array", "items": { "type": "string" }, "default": [] },
+          "pastTenseVerbs": { "type": "array", "items": { "type": "string" }, "default": [] },
+          "durationWords": { "type": "array", "items": { "type": "string" }, "default": [] },
+          "distanceWords": { "type": "array", "items": { "type": "string" }, "default": [] },
+          "negativePatterns": { "type": "array", "items": { "type": "string" }, "default": [] }
+        }
+      },
+      "rateLimiting": {
+        "type": "object", "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "cooldownMs": { "type": "number", "default": 5000 }
+        }
+      },
+      "debug": {
+        "type": "object", "additionalProperties": false,
+        "properties": {
+          "logDetections": { "type": "boolean", "default": false },
+          "logExtractions": { "type": "boolean", "default": false },
+          "logSkips": { "type": "boolean", "default": false }
+        }
+      }
+    }
+  }
+}

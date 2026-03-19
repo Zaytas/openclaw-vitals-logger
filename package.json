@@ -1,0 +1,37 @@
+{
+  "name": "openclaw-vitals-logger",
+  "version": "1.0.0",
+  "private": true,
+  "description": "OpenClaw plugin that automatically detects and logs physical activities from chat messages",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "dist",
+    "src",
+    "openclaw.plugin.json"
+  ],
+  "keywords": [
+    "openclaw",
+    "plugin",
+    "vitals",
+    "activity-logger",
+    "fitness"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.19.15",
+    "typescript": "^5.9.3"
+  }
+}

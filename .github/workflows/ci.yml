@@ -1,0 +1,24 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - run: npm install --include=dev
+      - run: npx tsc --noEmit
+      - name: Verify dist matches src
+        run: |
+          npx tsc
+          git diff --exit-code dist/ || (echo "dist/ is out of date" && exit 1)

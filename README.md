@@ -1,59 +1,93 @@
-# Vitals Logger Plugin
+# Vitals Logger Plugin for OpenClaw
 
-## Overview
-The Vitals Logger plugin for OpenClaw automatically detects and logs physical activities referenced in chat messages to a JSON file. It is designed to work seamlessly with OpenClaw, processing input from various configured channels.
+Automatically detects physical activities mentioned in chat messages and logs them to a JSON file. Works as an OpenClaw plugin using the `before_prompt_build` hook.
 
-## Features
-- Detects activities like cycling, running, swimming, yoga, and more
-- Logs detected data to a configurable JSON file
-- Prevents duplicate entries with customizable deduplication rules
-- Supports pre-processing gates, custom activity types, and time zones
+## How It Works
 
-## Setup
+**Presets** — Single-word triggers (e.g., "walk") instantly log a pre-configured default activity. No ambiguity, no delay.
 
-### Prerequisites
-- Node.js (v18 or higher)
-- npm
-- OpenClaw installation
+**Detection** — Longer messages pass through a scored keyword pre-gate. If the score exceeds the threshold, the plugin instructs the agent to extract activity details in a structured format, then captures and logs the result on the next turn.
 
-### Installation
-```bash
-# Clone the repository
+**Dedup** — Before logging, activities are checked against recent entries to prevent duplicates. If a potential duplicate is found, the user is asked to confirm.
+
+## Installation
+
+```
 cd ~/.openclaw/plugins
-
-git clone https://github.com/YOUR-PLUGIN-REPO/vitals-logger.git && cd vitals-logger/repo
-npm install
+git clone https://github.com/Zaytas/openclaw-vitals-logger.git vitals-logger
 ```
 
-### Registration
-Add the following snippet to your OpenClaw configuration file (e.g., `openclaw.json`):
+Add to your `openclaw.json`:
+
 ```json
 {
   "plugins": [
     {
       "name": "vitals-logger",
-      "path": "~/.openclaw/plugins/vitals-logger/repo",
+      "path": "~/.openclaw/plugins/vitals-logger",
       "enabled": true,
       "config": {
         "channels": ["signal"],
-        "activityTypes": ["running", "cycling"],
-        "dataFile": "~/.openclaw/workspace/data/vitals.json"
+        "dataFile": "~/.openclaw/workspace/data/vitals.json",
+        "timezone": "America/Denver",
+        "presets": {
+          "walk": {
+            "type": "walking",
+            "duration": 20,
+            "distance": 1,
+            "distanceUnit": "miles",
+            "description": "Daily walk",
+            "people": []
+          }
+        }
       }
     }
   ]
 }
 ```
 
-### Configuration
-Refer to `openclaw.plugin.json` for a full list of configurable options. Below is a quick reference table:
-| Option             | Type     | Default                                       | Description                         |
-|--------------------|----------|-----------------------------------------------|-------------------------------------|
-| `enabled`          | boolean  | true                                          | Enable or disable the plugin        |
-| `channels`         | string[] | ["signal"]                                   | Channels to monitor                 |
-| `dataFile`         | string   | "~/.openclaw/workspace/data/vitals.json"     | Path to vitals JSON file            |
-| `timezone`         | string   | "UTC"                                        | Timezone for handling timestamps    |
-| ...                | ...      | ...                                           | See `openclaw.plugin.json`          |
+Restart the gateway after adding the plugin.
 
-### License
+## Configuration
+
+See `openclaw.plugin.json` for the full schema. Key options:
+
+- **channels** — Which channels to monitor (default: `["signal"]`)
+- **dataFile** — Path to the vitals JSON file
+- **timezone** — IANA timezone for date resolution
+- **presets** — Map of trigger words to default activities
+- **preGate** — Scoring thresholds and keyword lists
+- **dedup** — Duplicate detection settings
+- **rateLimiting** — Per-channel cooldown after detection
+- **debug** — Logging flags for troubleshooting
+
+## Data Format
+
+Activities are stored as:
+
+```json
+{
+  "activities": [
+    {
+      "id": "act-abc123-xyz",
+      "date": "2026-03-19",
+      "time": null,
+      "type": "walking",
+      "duration": 20,
+      "distance": 1,
+      "distanceUnit": "miles",
+      "description": "Daily walk",
+      "people": [],
+      "source": "signal",
+      "stravaUrl": null,
+      "stravaData": null
+    }
+  ],
+  "weightLog": [],
+  "goals": []
+}
+```
+
+## License
+
 MIT
-

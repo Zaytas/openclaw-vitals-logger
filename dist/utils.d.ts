@@ -5,6 +5,14 @@ export declare function extractLastUserMessage(messages: Array<{
     role: string;
     content: string;
 }>): string | undefined;
+export declare function findLastAssistantMessage(messages: Array<{
+    role: string;
+    content: string;
+}>): string | undefined;
+/**
+ * Parse a ```vitals-extract``` code fence from assistant text.
+ */
+export declare function parseVitalsExtractBlock(text: string): unknown | undefined;
 export declare class TtlCache<T> {
     private defaultTtlMs;
     private cache;
@@ -12,6 +20,7 @@ export declare class TtlCache<T> {
     get(key: string): T | undefined;
     set(key: string, value: T, ttlMs?: number): void;
     has(key: string): boolean;
+    delete(key: string): void;
     private cleanup;
 }
 export declare function createLogger(api: {

@@ -10,15 +10,17 @@ import {
   TtlCache,
   messageFingerprint,
   extractLastUserMessage,
+  findLastAssistantMessage,
+  parseVitalsExtractBlock,
   generateActivityId,
   getTodayDate,
   resolvePath,
 } from './utils.js';
 import { scoreMessage, getDefaultPreGateConfig, matchPreset } from './pre-gate.js';
-import { buildExtractionPrompt, validateExtractionResult, parseExtractionJson } from './extractor.js';
+import { validateExtractionResult } from './extractor.js';
 import { isDuplicate, loadPendingState, addPendingCandidate, consumePendingCandidate } from './dedup.js';
 import { appendActivity, getRecentActivities } from './logger.js';
-import { buildLoggedContext, buildDuplicateContext, buildPendingCheckContext, formatConfirmation } from './formatter.js';
+import { buildLoggedContext, buildDuplicateContext } from './formatter.js';
 
 const DEFAULT_CONFIG: VitalsLoggerConfig = {
   enabled: true,
@@ -30,9 +32,7 @@ const DEFAULT_CONFIG: VitalsLoggerConfig = {
     'yoga', 'pickleball', 'hiking', 'other',
   ],
   extraction: {
-    model: 'google/gemini-2.0-flash',
-    maxTokens: 500,
-    timeout: 10000,
+    timeout: 120000,
   },
   dedup: {
     enabled: true,
@@ -44,7 +44,6 @@ const DEFAULT_CONFIG: VitalsLoggerConfig = {
   },
   confirmation: {
     enabled: true,
-    style: 'inline',
   },
   preGate: getDefaultPreGateConfig(),
   rateLimiting: {
@@ -89,9 +88,6 @@ function resolveChannel(ctx: HookCtx): string | undefined {
   return ctx.channel || ctx.session?.channel || undefined;
 }
 
-/**
- * Check if user message is a confirmation for a pending duplicate.
- */
 function isConfirmation(message: string): boolean {
   const lower = message.toLowerCase().trim();
   const confirmPatterns = [
@@ -100,6 +96,25 @@ function isConfirmation(message: string): boolean {
     'y', 'affirmative',
   ];
   return confirmPatterns.some(p => lower === p || lower.startsWith(p + ' ') || lower.startsWith(p + ',') || lower.startsWith(p + '.'));
+}
+
+function isRejection(message: string): boolean {
+  const lower = message.toLowerCase().trim();
+  const rejectPatterns = [
+    'no', 'nope', 'nah', "don't", 'dont', 'skip',
+    'cancel', 'never mind', 'nevermind', 'n',
+    "don't log", 'dont log', 'skip it', 'no thanks',
+  ];
+  return rejectPatterns.some(p => lower === p || lower.startsWith(p + ' ') || lower.startsWith(p + ',') || lower.startsWith(p + '.'));
+}
+
+function isSubagentSession(ctx: HookCtx): boolean {
+  if (ctx.isSubagent === true) return true;
+  if (ctx.sessionKey && ctx.sessionKey.includes(':subagent:')) return true;
+  if (ctx.session?.key && ctx.session.key.includes(':subagent:')) return true;
+  if (ctx.parentSessionKey) return true;
+  if (ctx.session?.parentKey) return true;
+  return false;
 }
 
 export default function register(api: PluginApi): void {
@@ -112,10 +127,13 @@ export default function register(api: PluginApi): void {
   }
 
   // Idempotency cache — prevents double-logging on prompt rebuilds
-  const processedCache = new TtlCache<boolean>(30000); // 30s TTL
+  const processedCache = new TtlCache<boolean>(30000);
 
-  // Rate limit cache — per-channel cooldown
+  // Rate limit cache — per-channel, set only AFTER positive detection
   const rateLimitCache = new TtlCache<boolean>(config.rateLimiting.cooldownMs);
+
+  // Pending extractions — tracks sessions awaiting agent extraction response
+  const pendingExtractions = new TtlCache<{ channel: string }>(config.extraction.timeout);
 
   const pendingFile = resolvePath(config.dataFile) + '.pending.json';
 
@@ -126,20 +144,26 @@ export default function register(api: PluginApi): void {
       const event = _event as unknown as HookEvent;
       const hookCtx = ctx as unknown as HookCtx;
 
-      // Skip subagents
-      if (hookCtx.isSubagent) {
-        if (config.debug.logSkips) log.info('Skip: subagent');
+      // ── Skip subagents ──
+      if (isSubagentSession(hookCtx)) {
+        if (config.debug.logSkips) log.info('Skip: subagent session');
         return undefined;
       }
 
-      // Channel filter
+      // ── Channel filter — strict when configured ──
       const channel = resolveChannel(hookCtx);
-      if (config.channels.length > 0 && channel && !config.channels.includes(channel)) {
-        if (config.debug.logSkips) log.info(`Skip: channel ${channel} not in ${config.channels.join(',')}`);
-        return undefined;
+      if (config.channels.length > 0) {
+        if (!channel) {
+          if (config.debug.logSkips) log.info('Skip: no channel info, channels filter is configured');
+          return undefined;
+        }
+        if (!config.channels.includes(channel)) {
+          if (config.debug.logSkips) log.info(`Skip: channel ${channel} not in ${config.channels.join(',')}`);
+          return undefined;
+        }
       }
 
-      // Extract last user message
+      // ── Extract messages ──
       const messages = event.messages as Array<{ role: string; content: string }> | undefined;
       if (!messages || messages.length === 0) {
         if (config.debug.logSkips) log.info('Skip: no messages');
@@ -154,11 +178,71 @@ export default function register(api: PluginApi): void {
 
       const sessionId = resolveSessionId(hookCtx);
 
-      // Idempotency check
+      // ── Idempotency check ──
       const fingerprint = messageFingerprint(sessionId, userMessage);
       if (processedCache.has(fingerprint)) {
         if (config.debug.logSkips) log.info('Skip: already processed (idempotency)');
         return undefined;
+      }
+
+      // ── Check for completed extraction from agent's last reply ──
+      if (pendingExtractions.has(sessionId)) {
+        const lastAssistant = findLastAssistantMessage(messages);
+        if (lastAssistant) {
+          const extractionData = parseVitalsExtractBlock(lastAssistant);
+          if (extractionData) {
+            const pendingInfo = pendingExtractions.get(sessionId);
+            pendingExtractions.delete(sessionId);
+            processedCache.set(fingerprint, true);
+
+            const validated = validateExtractionResult(extractionData, log);
+            if (validated && validated.detected && validated.activity) {
+              const today = getTodayDate(config.timezone);
+              const activity: Activity = {
+                id: generateActivityId(),
+                date: validated.activity.date || today,
+                time: validated.activity.time,
+                type: validated.activity.type,
+                duration: validated.activity.duration,
+                distance: validated.activity.distance,
+                distanceUnit: validated.activity.distanceUnit,
+                description: validated.activity.description,
+                people: [...validated.activity.people],
+                source: pendingInfo?.channel || channel || 'unknown',
+                stravaUrl: validated.activity.stravaUrl,
+                stravaData: null,
+              };
+
+              // Dedup
+              if (config.dedup.enabled) {
+                const recent = getRecentActivities(config.dataFile, config.dedup.windowDays, log);
+                const dup = isDuplicate(activity, recent, config.dedup);
+                if (dup) {
+                  if (config.dedup.confirmDuplicates) {
+                    addPendingCandidate(pendingFile, {
+                      activity,
+                      matchedExisting: dup,
+                      timestamp: Date.now(),
+                      sessionId,
+                    }, config.dedup, log);
+                    return { appendSystemContext: buildDuplicateContext(activity, dup) };
+                  }
+                  log.info('Extraction skipped — duplicate');
+                  return undefined;
+                }
+              }
+
+              const success = await appendActivity(config.dataFile, activity, log);
+              if (success) {
+                if (config.debug.logExtractions) log.info(`Extracted and logged: ${activity.type}`);
+                // Agent already said "✅ Logged: ..." — no need to inject again
+                return undefined;
+              }
+            }
+          }
+        }
+        // If no extraction found, clear pending (expired or agent didn't include it)
+        pendingExtractions.delete(sessionId);
       }
 
       // ── Preset check (runs before pre-gate) ──
@@ -196,7 +280,7 @@ export default function register(api: PluginApi): void {
                 }, config.dedup, log);
                 return { appendSystemContext: buildDuplicateContext(activity, dup) };
               }
-              log.info(`Preset "${presetMatch.key}" skipped — duplicate detected`);
+              log.info(`Preset "${presetMatch.key}" skipped — duplicate`);
               return undefined;
             }
           }
@@ -209,41 +293,35 @@ export default function register(api: PluginApi): void {
         }
       }
 
-      // Check for pending duplicate confirmation first
+      // ── Pending duplicate confirmation check ──
       if (config.dedup.enabled && config.dedup.confirmDuplicates) {
         const pending = loadPendingState(pendingFile, log);
         const hasPending = pending.candidates.some(c => c.sessionId === sessionId);
 
-        if (hasPending && isConfirmation(userMessage)) {
-          const candidate = consumePendingCandidate(pendingFile, sessionId, config.dedup, log);
-          if (candidate) {
-            processedCache.set(fingerprint, true);
-            const success = await appendActivity(config.dataFile, candidate.activity, log);
-            if (success) {
-              return { appendSystemContext: buildLoggedContext(candidate.activity) };
-            }
-          }
-          return undefined;
-        }
-
         if (hasPending) {
-          // User didn't confirm — pending will expire naturally
-          processedCache.set(fingerprint, true);
-          return undefined;
+          if (isConfirmation(userMessage)) {
+            const candidate = consumePendingCandidate(pendingFile, sessionId, config.dedup, log);
+            if (candidate) {
+              processedCache.set(fingerprint, true);
+              const success = await appendActivity(config.dataFile, candidate.activity, log);
+              if (success) {
+                return { appendSystemContext: buildLoggedContext(candidate.activity) };
+              }
+            }
+            return undefined;
+          }
+
+          if (isRejection(userMessage)) {
+            consumePendingCandidate(pendingFile, sessionId, config.dedup, log);
+            processedCache.set(fingerprint, true);
+            return { appendSystemContext: '[Vitals Logger] User declined to log the duplicate activity. Acknowledged.' };
+          }
+
+          // Not a confirmation or rejection — let message flow through normal pipeline
         }
       }
 
-      // Rate limiting
-      if (config.rateLimiting.enabled) {
-        const rlKey = `rl:${channel || 'default'}`;
-        if (rateLimitCache.has(rlKey)) {
-          if (config.debug.logSkips) log.info('Skip: rate limited');
-          return undefined;
-        }
-        rateLimitCache.set(rlKey, true);
-      }
-
-      // Pre-gate scoring
+      // ── Pre-gate scoring ──
       const gateResult = scoreMessage(userMessage, config.preGate);
       if (!gateResult.pass) {
         if (config.debug.logDetections) {
@@ -257,34 +335,50 @@ export default function register(api: PluginApi): void {
         log.info(`Pre-gate pass (score=${gateResult.score}): ${gateResult.reasons.join(', ')}`);
       }
 
-      // Mark as processed BEFORE extraction to prevent double-processing
+      // ── Rate limiting (AFTER positive detection) ──
+      if (config.rateLimiting.enabled) {
+        const rlKey = `detect:${channel || 'default'}`;
+        if (rateLimitCache.has(rlKey)) {
+          if (config.debug.logSkips) log.info('Skip: rate limited');
+          processedCache.set(fingerprint, true);
+          return undefined;
+        }
+        rateLimitCache.set(rlKey, true);
+      }
+
+      // ── Mark as processed ──
       processedCache.set(fingerprint, true);
 
-      // Build extraction prompt for the agent
-      // Phase 1: We use appendSystemContext to instruct the agent to extract + confirm
-      // Phase 2: Direct LLM API call for extraction
+      // ── Build extraction instruction for the agent ──
       const today = getTodayDate(config.timezone);
 
-      // For now, we do inline extraction via system context injection
-      // The agent will see the instruction and handle extraction
+      // Track pending extraction
+      pendingExtractions.set(sessionId, { channel: channel || 'unknown' });
+
       const extractionInstruction = [
         `[Vitals Logger] A physical activity was detected in the user's message (score: ${gateResult.score}).`,
-        `Please extract the activity details and log it.`,
-        ``,
-        `Extract from the user's message:`,
-        `- Activity type (one of: ${config.activityTypes.join(', ')})`,
-        `- Duration in minutes (if mentioned)`,
-        `- Distance and unit (if mentioned)`,
-        `- Date (default: ${today})`,
-        `- Time (if mentioned)`,
-        `- People involved (if mentioned)`,
-        `- Strava URL (if mentioned)`,
-        ``,
-        `After extracting, call the vitals API to log it:`,
-        `POST http://localhost:3000/api/vitals with the activity data.`,
-        `Then briefly confirm to the user: \"✅ Logged: [summary]\"`,
-        ``,
-        `If you're unsure whether this is actually a physical activity, ask the user to confirm.`,
+        `Extract the activity details and include this JSON block in your response (inside a code fence tagged vitals-extract):`,
+        '',
+        '```vitals-extract',
+        JSON.stringify({
+          detected: true,
+          activity: {
+            type: `<one of: ${config.activityTypes.join(', ')}>`,
+            duration: '<minutes as number, or null>',
+            distance: '<number, or null>',
+            distanceUnit: '<miles|km|null>',
+            date: today,
+            time: '<time string or null>',
+            description: '<brief summary>',
+            people: ['<names or empty array>'],
+            stravaUrl: '<URL or null>',
+          },
+        }, null, 2),
+        '```',
+        '',
+        `Replace placeholder values with actual data from the user's message. Use null for unknown fields.`,
+        `If this is NOT actually a physical activity, set "detected" to false.`,
+        `After the JSON block, briefly confirm to the user: "✅ Logged: [summary]"`,
       ].join('\n');
 
       return { appendSystemContext: extractionInstruction };

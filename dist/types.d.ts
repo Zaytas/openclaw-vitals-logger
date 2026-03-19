@@ -13,8 +13,6 @@ export interface VitalsLoggerConfig {
     presets: PresetsMap;
 }
 export interface ExtractionConfig {
-    model: string;
-    maxTokens: number;
     timeout: number;
 }
 export interface DedupConfig {
@@ -27,13 +25,11 @@ export interface DedupConfig {
 }
 export interface ConfirmationConfig {
     enabled: boolean;
-    style: 'inline' | 'brief';
 }
 export interface PreGateConfig {
     minMessageLength: number;
     scoreThreshold: number;
     activityNouns: string[];
-    activityVerbs: string[];
     pastTenseVerbs: string[];
     durationWords: string[];
     distanceWords: string[];

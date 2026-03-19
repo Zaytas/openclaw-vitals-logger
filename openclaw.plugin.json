@@ -1,6 +1,6 @@
 {
   "name": "vitals-logger",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Automatically detects and logs physical activities from chat messages to a JSON file",
   "main": "dist/index.js",
   "hooks": ["before_prompt_build"],
@@ -8,79 +8,218 @@
     "type": "object",
     "additionalProperties": false,
     "properties": {
-      "enabled": { "type": "boolean", "default": true, "description": "Enable or disable the plugin" },
-      "channels": { "type": "array", "items": { "type": "string" }, "default": ["signal"], "description": "Channels to monitor" },
-      "dataFile": { "type": "string", "default": "~/.openclaw/workspace/data/vitals.json", "description": "Path to vitals JSON file" },
-      "timezone": { "type": "string", "default": "UTC", "description": "IANA timezone for date resolution" },
-      "activityTypes": { "type": "array", "items": { "type": "string" }, "default": ["walking", "cycling", "running", "swimming", "weights", "yoga", "pickleball", "hiking", "other"] },
+      "enabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Enable or disable the plugin"
+      },
+      "channels": {
+        "type": "array",
+        "items": {"type": "string"},
+        "default": ["signal"],
+        "description": "Channels to monitor for activity messages"
+      },
+      "dataFile": {
+        "type": "string",
+        "default": "~/.openclaw/workspace/data/vitals.json",
+        "description": "Path to vitals JSON data file"
+      },
+      "timezone": {
+        "type": "string",
+        "default": "UTC",
+        "description": "IANA timezone for date resolution"
+      },
+      "activityTypes": {
+        "type": "array",
+        "items": {"type": "string"},
+        "default": ["walking", "cycling", "running", "swimming", "weights", "yoga", "pickleball", "hiking", "other"],
+        "description": "Recognized activity types"
+      },
       "extraction": {
-        "type": "object", "additionalProperties": false,
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Extraction settings",
         "properties": {
-          "model": { "type": "string", "default": "google/gemini-2.0-flash" },
-          "maxTokens": { "type": "number", "default": 500 },
-          "timeout": { "type": "number", "default": 10000 }
+          "timeout": {
+            "type": "number",
+            "default": 120000,
+            "description": "How long to wait for agent extraction response (ms)"
+          }
         }
       },
       "dedup": {
-        "type": "object", "additionalProperties": false,
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Duplicate detection settings",
         "properties": {
-          "enabled": { "type": "boolean", "default": true },
-          "windowDays": { "type": "number", "default": 1 },
-          "confirmDuplicates": { "type": "boolean", "default": true },
-          "durationTolerancePercent": { "type": "number", "default": 20 },
-          "distanceTolerancePercent": { "type": "number", "default": 20 },
-          "pendingExpireMinutes": { "type": "number", "default": 10 }
+          "enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Enable duplicate checking"
+          },
+          "windowDays": {
+            "type": "number",
+            "default": 1,
+            "description": "Days to look back for duplicates"
+          },
+          "confirmDuplicates": {
+            "type": "boolean",
+            "default": true,
+            "description": "Ask user to confirm potential duplicates"
+          },
+          "durationTolerancePercent": {
+            "type": "number",
+            "default": 20,
+            "description": "Duration similarity threshold (%)"
+          },
+          "distanceTolerancePercent": {
+            "type": "number",
+            "default": 20,
+            "description": "Distance similarity threshold (%)"
+          },
+          "pendingExpireMinutes": {
+            "type": "number",
+            "default": 10,
+            "description": "Minutes before pending confirmations expire"
+          }
         }
       },
       "confirmation": {
-        "type": "object", "additionalProperties": false,
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Confirmation message settings",
         "properties": {
-          "enabled": { "type": "boolean", "default": true },
-          "style": { "type": "string", "enum": ["inline", "brief"], "default": "inline" }
+          "enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Show confirmation after logging"
+          }
         }
       },
       "preGate": {
-        "type": "object", "additionalProperties": false,
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Pre-gate scoring configuration",
         "properties": {
-          "minMessageLength": { "type": "number", "default": 10 },
-          "scoreThreshold": { "type": "number", "default": 4 },
-          "activityNouns": { "type": "array", "items": { "type": "string" }, "default": [] },
-          "activityVerbs": { "type": "array", "items": { "type": "string" }, "default": [] },
-          "pastTenseVerbs": { "type": "array", "items": { "type": "string" }, "default": [] },
-          "durationWords": { "type": "array", "items": { "type": "string" }, "default": [] },
-          "distanceWords": { "type": "array", "items": { "type": "string" }, "default": [] },
-          "negativePatterns": { "type": "array", "items": { "type": "string" }, "default": [] }
+          "minMessageLength": {
+            "type": "number",
+            "default": 10,
+            "description": "Minimum message length to evaluate"
+          },
+          "scoreThreshold": {
+            "type": "number",
+            "default": 4,
+            "description": "Minimum score to trigger detection"
+          },
+          "activityNouns": {
+            "type": "array",
+            "items": {"type": "string"},
+            "default": [],
+            "description": "Activity noun keywords (empty = defaults)"
+          },
+          "pastTenseVerbs": {
+            "type": "array",
+            "items": {"type": "string"},
+            "default": [],
+            "description": "Past tense verb keywords (empty = defaults)"
+          },
+          "durationWords": {
+            "type": "array",
+            "items": {"type": "string"},
+            "default": [],
+            "description": "Duration keywords (empty = defaults)"
+          },
+          "distanceWords": {
+            "type": "array",
+            "items": {"type": "string"},
+            "default": [],
+            "description": "Distance keywords (empty = defaults)"
+          },
+          "negativePatterns": {
+            "type": "array",
+            "items": {"type": "string"},
+            "default": [],
+            "description": "Patterns that indicate non-activity usage (empty = defaults)"
+          }
         }
       },
       "rateLimiting": {
-        "type": "object", "additionalProperties": false,
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Rate limiting after positive detection",
         "properties": {
-          "enabled": { "type": "boolean", "default": true },
-          "cooldownMs": { "type": "number", "default": 5000 }
+          "enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Enable rate limiting"
+          },
+          "cooldownMs": {
+            "type": "number",
+            "default": 5000,
+            "description": "Cooldown after detection (ms)"
+          }
         }
       },
       "debug": {
-        "type": "object", "additionalProperties": false,
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Debug logging flags",
         "properties": {
-          "logDetections": { "type": "boolean", "default": false },
-          "logExtractions": { "type": "boolean", "default": false },
-          "logSkips": { "type": "boolean", "default": false }
+          "logDetections": {
+            "type": "boolean",
+            "default": false,
+            "description": "Log pre-gate detection results"
+          },
+          "logExtractions": {
+            "type": "boolean",
+            "default": false,
+            "description": "Log extraction capture results"
+          },
+          "logSkips": {
+            "type": "boolean",
+            "default": false,
+            "description": "Log skipped messages with reasons"
+          }
         }
       },
       "presets": {
         "type": "object",
         "default": {},
-        "description": "Preset triggers for quick single-word activity logging. Keys are trigger words, values define the default activity.",
+        "description": "Preset triggers for quick single-word activity logging. Keys are trigger words.",
         "additionalProperties": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "type": { "type": "string", "description": "Activity type (walking, cycling, etc.)" },
-            "duration": { "type": ["number", "null"], "default": null, "description": "Default duration in minutes" },
-            "distance": { "type": ["number", "null"], "default": null, "description": "Default distance" },
-            "distanceUnit": { "type": ["string", "null"], "default": null, "description": "Distance unit (miles, km)" },
-            "description": { "type": "string", "default": "", "description": "Default description" },
-            "people": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Default people" }
+            "type": {
+              "type": "string",
+              "description": "Activity type (walking, cycling, etc.)"
+            },
+            "duration": {
+              "type": ["number", "null"],
+              "default": null,
+              "description": "Default duration in minutes"
+            },
+            "distance": {
+              "type": ["number", "null"],
+              "default": null,
+              "description": "Default distance"
+            },
+            "distanceUnit": {
+              "type": ["string", "null"],
+              "default": null,
+              "description": "Distance unit (miles, km)"
+            },
+            "description": {
+              "type": "string",
+              "default": "",
+              "description": "Default description"
+            },
+            "people": {
+              "type": "array",
+              "items": {"type": "string"},
+              "default": [],
+              "description": "Default people involved"
+            }
           },
           "required": ["type"]
         }

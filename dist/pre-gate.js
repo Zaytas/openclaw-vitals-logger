@@ -46,7 +46,7 @@ export function scoreMessage(message, config) {
     for (const pattern of negatives) {
         if (lower.includes(pattern.toLowerCase())) {
             score += SCORE_WEIGHTS.negativePattern;
-            reasons.push(`negative: \"${pattern}\"`);
+            reasons.push(`negative: "${pattern}"`);
         }
     }
     const nouns = config.activityNouns.length > 0 ? config.activityNouns : DEFAULT_ACTIVITY_NOUNS;
@@ -102,25 +102,24 @@ export function scoreMessage(message, config) {
     return { pass: score >= config.scoreThreshold, score, reasons };
 }
 export function matchPreset(message, presets) {
-    const trimmed = message.trim().toLowerCase();
-    // Only match presets on short messages (single word or brief phrase)
+    let trimmed = message.trim().toLowerCase();
     if (trimmed.length > 50)
         return undefined;
+    trimmed = trimmed.replace(/[.!?,;:]+$/, '').trim();
+    if (!trimmed)
+        return undefined;
     const words = trimmed.split(/\s+/);
+    const firstWord = words[0];
     for (const [key, preset] of Object.entries(presets)) {
         const lowerKey = key.toLowerCase();
-        // Exact match on the whole message
         if (trimmed === lowerKey)
             return { key, preset };
-        // First word match (e.g., "walk" in "walk with kids")
-        if (words[0] === lowerKey)
+        if (firstWord === lowerKey)
             return { key, preset };
-        // Simple past tense match (walked → walk, biked → bike)
-        if (words[0] === lowerKey + 'ed')
+        if (firstWord === lowerKey + 'ed')
             return { key, preset };
-        if (words[0] === lowerKey + 'd')
+        if (firstWord === lowerKey + 'd')
             return { key, preset };
-        // Handle irregular: "rode" for "ride", etc — user can add those as separate preset keys
     }
     return undefined;
 }
@@ -129,7 +128,6 @@ export function getDefaultPreGateConfig() {
         minMessageLength: 10,
         scoreThreshold: 4,
         activityNouns: DEFAULT_ACTIVITY_NOUNS,
-        activityVerbs: [],
         pastTenseVerbs: DEFAULT_PAST_TENSE,
         durationWords: DEFAULT_DURATION_WORDS,
         distanceWords: DEFAULT_DISTANCE_WORDS,

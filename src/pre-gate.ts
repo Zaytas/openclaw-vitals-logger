@@ -56,7 +56,7 @@ export function scoreMessage(message: string, config: PreGateConfig): PreGateRes
   for (const pattern of negatives) {
     if (lower.includes(pattern.toLowerCase())) {
       score += SCORE_WEIGHTS.negativePattern;
-      reasons.push(`negative: \"${pattern}\"`);
+      reasons.push(`negative: "${pattern}"`);
     }
   }
 
@@ -120,27 +120,21 @@ export function scoreMessage(message: string, config: PreGateConfig): PreGateRes
 }
 
 export function matchPreset(message: string, presets: PresetsMap): { key: string; preset: ActivityPreset } | undefined {
-  const trimmed = message.trim().toLowerCase();
-
-  // Only match presets on short messages (single word or brief phrase)
+  let trimmed = message.trim().toLowerCase();
   if (trimmed.length > 50) return undefined;
 
+  trimmed = trimmed.replace(/[.!?,;:]+$/, '').trim();
+  if (!trimmed) return undefined;
+
   const words = trimmed.split(/\s+/);
+  const firstWord = words[0];
 
   for (const [key, preset] of Object.entries(presets)) {
     const lowerKey = key.toLowerCase();
-
-    // Exact match on the whole message
     if (trimmed === lowerKey) return { key, preset };
-
-    // First word match (e.g., "walk" in "walk with kids")
-    if (words[0] === lowerKey) return { key, preset };
-
-    // Simple past tense match (walked → walk, biked → bike)
-    if (words[0] === lowerKey + 'ed') return { key, preset };
-    if (words[0] === lowerKey + 'd') return { key, preset };
-
-    // Handle irregular: "rode" for "ride", etc — user can add those as separate preset keys
+    if (firstWord === lowerKey) return { key, preset };
+    if (firstWord === lowerKey + 'ed') return { key, preset };
+    if (firstWord === lowerKey + 'd') return { key, preset };
   }
 
   return undefined;
@@ -151,7 +145,6 @@ export function getDefaultPreGateConfig(): PreGateConfig {
     minMessageLength: 10,
     scoreThreshold: 4,
     activityNouns: DEFAULT_ACTIVITY_NOUNS,
-    activityVerbs: [],
     pastTenseVerbs: DEFAULT_PAST_TENSE,
     durationWords: DEFAULT_DURATION_WORDS,
     distanceWords: DEFAULT_DISTANCE_WORDS,

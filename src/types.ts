@@ -16,9 +16,7 @@ export interface VitalsLoggerConfig {
 }
 
 export interface ExtractionConfig {
-  model: string;
-  maxTokens: number;
-  timeout: number;
+  timeout: number; // TTL for pending extractions in ms
 }
 
 export interface DedupConfig {
@@ -32,14 +30,12 @@ export interface DedupConfig {
 
 export interface ConfirmationConfig {
   enabled: boolean;
-  style: 'inline' | 'brief';
 }
 
 export interface PreGateConfig {
   minMessageLength: number;
   scoreThreshold: number;
   activityNouns: string[];
-  activityVerbs: string[];
   pastTenseVerbs: string[];
   durationWords: string[];
   distanceWords: string[];
@@ -56,6 +52,7 @@ export interface DebugConfig {
   logExtractions: boolean;
   logSkips: boolean;
 }
+
 // ─── Activity Presets ───
 
 export interface ActivityPreset {
@@ -68,6 +65,7 @@ export interface ActivityPreset {
 }
 
 export type PresetsMap = Record<string, ActivityPreset>;
+
 // ─── Activity Data ───
 
 export interface Activity {
@@ -92,8 +90,6 @@ export interface VitalsData {
   [key: string]: unknown;
 }
 
-// ─── Extraction Result ───
-
 export interface ExtractionResult {
   detected: boolean;
   activity?: {
@@ -109,19 +105,16 @@ export interface ExtractionResult {
   };
 }
 
-// ─── Pending Duplicate ───
-
 export interface PendingCandidate {
   activity: Activity;
   matchedExisting: Activity;
   timestamp: number;
   sessionId: string;
 }
+
 export interface PendingState {
   candidates: PendingCandidate[];
 }
-
-// ─── Plugin API (from OpenClaw) ───
 
 export interface PluginApi {
   on(event: string, handler: (event: Record<string, unknown>, ctx: Record<string, unknown>) => unknown): void;
@@ -132,8 +125,6 @@ export interface PluginApi {
     error?: (msg: string) => void;
   };
 }
-
-// ─── Hook Context ───
 
 export interface HookEvent {
   prompt?: string;
@@ -156,8 +147,6 @@ export interface HookCtx {
   };
   [key: string]: unknown;
 }
-
-// ─── Pre-gate Result ───
 
 export interface PreGateResult {
   pass: boolean;

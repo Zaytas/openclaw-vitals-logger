@@ -1,39 +1,26 @@
-import type { Activity, PendingCandidate } from './types.js';
+import type { Activity } from './types.js';
 
-/**
- * Format a confirmation message for a logged activity.
- */
 export function formatConfirmation(activity: Activity): string {
-  const parts: string[] = [];
-
-  parts.push(`✅ Logged: ${formatActivitySummary(activity)}`);
-
-  return parts.join('');
+  return `✅ Logged: ${formatActivitySummary(activity)}`;
 }
 
-/**
- * Format a duplicate warning message.
- */
 export function formatDuplicateWarning(newActivity: Activity, existing: Activity): string {
   return (
     `⚠️ This looks similar to an already logged activity: ${formatActivitySummary(existing)}. ` +
-    `Should I log \"${formatActivitySummary(newActivity)}\" as a separate activity? Reply yes/no.`
+    `Should I log "${formatActivitySummary(newActivity)}" as a separate activity? Reply yes/no.`
   );
 }
 
-/**
- * Format a brief activity summary.
- */
 export function formatActivitySummary(activity: Activity): string {
   const parts: string[] = [];
 
-  if (activity.duration) {
+  if (activity.duration != null && activity.duration >= 0) {
     parts.push(`${activity.duration}min`);
   }
 
   parts.push(activity.type);
 
-  if (activity.distance) {
+  if (activity.distance != null && activity.distance >= 0) {
     parts.push(`(${activity.distance} ${activity.distanceUnit || 'mi'})`);
   }
 
@@ -44,34 +31,17 @@ export function formatActivitySummary(activity: Activity): string {
   return parts.join(' ');
 }
 
-/**
- * Build the system context injection for a confirmed activity log.
- */
 export function buildLoggedContext(activity: Activity): string {
   return (
     `[Vitals Logger] An activity was automatically detected and logged from this conversation. ` +
-    `Briefly acknowledge it to the user: \"${formatConfirmation(activity)}\"`
+    `Briefly acknowledge it to the user: "${formatConfirmation(activity)}"`
   );
 }
 
-/**
- * Build the system context injection for a pending duplicate.
- */
 export function buildDuplicateContext(newActivity: Activity, existing: Activity): string {
   return (
     `[Vitals Logger] A potential duplicate activity was detected. ` +
-    `Ask the user: \"${formatDuplicateWarning(newActivity, existing)}\" ` +
+    `Ask the user: "${formatDuplicateWarning(newActivity, existing)}" ` +
     `If the user confirms, the activity will be logged on the next message.`
-  );
-}
-
-/**
- * Build system context to check for duplicate confirmation response.
- */
-export function buildPendingCheckContext(): string {
-  return (
-    `[Vitals Logger] There is a pending activity that was flagged as a potential duplicate. ` +
-    `If the user's message is confirming they want to log it (yes, sure, log it, etc.), ` +
-    `the system will automatically commit it.`
   );
 }

@@ -1,23 +1,43 @@
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from 'node:fs';
 import { safeJsonParse } from './utils.js';
-/**
- * Check if a new activity is a likely duplicate of an existing one.
- */
+function normalizeDistanceUnit(unit) {
+    if (!unit)
+        return 'mi';
+    const lower = unit.toLowerCase().trim();
+    if (lower === 'km' || lower === 'kilometers' || lower === 'kilometer')
+        return 'km';
+    return 'mi';
+}
+function descriptionsMatch(a, b) {
+    if (!a || !b)
+        return false;
+    const na = a.toLowerCase().trim();
+    const nb = b.toLowerCase().trim();
+    if (na === nb)
+        return true;
+    const wordsA = new Set(na.split(/\s+/));
+    const wordsB = new Set(nb.split(/\s+/));
+    const intersection = [...wordsA].filter(w => wordsB.has(w));
+    const union = new Set([...wordsA, ...wordsB]);
+    return union.size > 0 && intersection.length / union.size > 0.6;
+}
 export function isDuplicate(newActivity, existingActivities, config) {
-    const windowMs = config.windowDays * 24 * 60 * 60 * 1000;
-    const newDate = new Date(newActivity.date).getTime();
     for (const existing of existingActivities) {
-        const existingDate = new Date(existing.date).getTime();
-        // Check date within window
-        if (Math.abs(newDate - existingDate) > windowMs)
-            continue;
-        // Must be same date for exact dedup
         if (newActivity.date !== existing.date)
             continue;
-        // Must be same activity type
         if (newActivity.type.toLowerCase() !== existing.type.toLowerCase())
             continue;
-        // Check duration similarity (if both have values)
+        const bothLackMetrics = (newActivity.duration == null && existing.duration == null) &&
+            (newActivity.distance == null && existing.distance == null);
+        if (bothLackMetrics) {
+            if (!descriptionsMatch(newActivity.description, existing.description))
+                continue;
+            return existing;
+        }
+        if ((newActivity.duration != null) !== (existing.duration != null))
+            continue;
+        if ((newActivity.distance != null) !== (existing.distance != null))
+            continue;
         if (newActivity.duration != null && existing.duration != null) {
             const tolerance = config.durationTolerancePercent / 100;
             const diff = Math.abs(newActivity.duration - existing.duration);
@@ -25,22 +45,21 @@ export function isDuplicate(newActivity, existingActivities, config) {
             if (max > 0 && diff / max > tolerance)
                 continue;
         }
-        // Check distance similarity (if both have values)
         if (newActivity.distance != null && existing.distance != null) {
+            const newUnit = normalizeDistanceUnit(newActivity.distanceUnit);
+            const existingUnit = normalizeDistanceUnit(existing.distanceUnit);
+            if (newUnit !== existingUnit)
+                continue;
             const tolerance = config.distanceTolerancePercent / 100;
             const diff = Math.abs(newActivity.distance - existing.distance);
             const max = Math.max(newActivity.distance, existing.distance);
             if (max > 0 && diff / max > tolerance)
                 continue;
         }
-        // If we get here, it's a likely duplicate
         return existing;
     }
     return undefined;
 }
-/**
- * Load pending duplicate candidates from disk.
- */
 export function loadPendingState(pendingFile, log) {
     try {
         if (!existsSync(pendingFile))
@@ -56,9 +75,6 @@ export function loadPendingState(pendingFile, log) {
         return { candidates: [] };
     }
 }
-/**
- * Save pending duplicate candidates to disk.
- */
 export function savePendingState(pendingFile, state, log) {
     try {
         writeFileSync(pendingFile, JSON.stringify(state, null, 2), 'utf-8');
@@ -67,30 +83,19 @@ export function savePendingState(pendingFile, state, log) {
         log.error(`Failed to save pending state: ${err}`);
     }
 }
-/**
- * Add a pending candidate.
- */
 export function addPendingCandidate(pendingFile, candidate, config, log) {
     const state = loadPendingState(pendingFile, log);
-    // Expire old candidates
     const expireMs = config.pendingExpireMinutes * 60 * 1000;
     const now = Date.now();
     state.candidates = state.candidates.filter(c => now - c.timestamp < expireMs);
-    // Add new
     state.candidates.push(candidate);
     savePendingState(pendingFile, state, log);
 }
-/**
- * Check if there's a pending candidate for this session and remove it (consume).
- * Returns the candidate if found and user confirmed.
- */
 export function consumePendingCandidate(pendingFile, sessionId, config, log) {
     const state = loadPendingState(pendingFile, log);
-    // Expire old candidates
     const expireMs = config.pendingExpireMinutes * 60 * 1000;
     const now = Date.now();
     state.candidates = state.candidates.filter(c => now - c.timestamp < expireMs);
-    // Find candidate for this session
     const idx = state.candidates.findIndex(c => c.sessionId === sessionId);
     if (idx === -1)
         return undefined;
@@ -99,9 +104,6 @@ export function consumePendingCandidate(pendingFile, sessionId, config, log) {
     savePendingState(pendingFile, state, log);
     return candidate;
 }
-/**
- * Clear all pending candidates (cleanup).
- */
 export function clearPendingState(pendingFile, log) {
     try {
         if (existsSync(pendingFile))

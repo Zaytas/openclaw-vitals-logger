@@ -34,6 +34,29 @@ export function extractLastUserMessage(messages) {
     }
     return undefined;
 }
+export function findLastAssistantMessage(messages) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === 'assistant' && typeof messages[i].content === 'string') {
+            return messages[i].content;
+        }
+    }
+    return undefined;
+}
+/**
+ * Parse a ```vitals-extract``` code fence from assistant text.
+ */
+export function parseVitalsExtractBlock(text) {
+    const regex = /```vitals-extract\s*\n([\s\S]*?)\n\s*```/;
+    const match = regex.exec(text);
+    if (!match)
+        return undefined;
+    try {
+        return JSON.parse(match[1]);
+    }
+    catch {
+        return undefined;
+    }
+}
 export class TtlCache {
     defaultTtlMs;
     cache = new Map();
@@ -60,6 +83,9 @@ export class TtlCache {
     }
     has(key) {
         return this.get(key) !== undefined;
+    }
+    delete(key) {
+        this.cache.delete(key);
     }
     cleanup() {
         const now = Date.now();

@@ -39,6 +39,29 @@ export function extractLastUserMessage(messages: Array<{ role: string; content: 
   return undefined;
 }
 
+export function findLastAssistantMessage(messages: Array<{ role: string; content: string }>): string | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'assistant' && typeof messages[i].content === 'string') {
+      return messages[i].content;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Parse a ```vitals-extract``` code fence from assistant text.
+ */
+export function parseVitalsExtractBlock(text: string): unknown | undefined {
+  const regex = /```vitals-extract\s*\n([\s\S]*?)\n\s*```/;
+  const match = regex.exec(text);
+  if (!match) return undefined;
+  try {
+    return JSON.parse(match[1]);
+  } catch {
+    return undefined;
+  }
+}
+
 export class TtlCache<T> {
   private cache = new Map<string, { value: T; expires: number }>();
 
@@ -64,6 +87,10 @@ export class TtlCache<T> {
 
   has(key: string): boolean {
     return this.get(key) !== undefined;
+  }
+
+  delete(key: string): void {
+    this.cache.delete(key);
   }
 
   private cleanup(): void {

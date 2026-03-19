@@ -66,6 +66,24 @@
           "logExtractions": { "type": "boolean", "default": false },
           "logSkips": { "type": "boolean", "default": false }
         }
+      },
+      "presets": {
+        "type": "object",
+        "default": {},
+        "description": "Preset triggers for quick single-word activity logging. Keys are trigger words, values define the default activity.",
+        "additionalProperties": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": { "type": "string", "description": "Activity type (walking, cycling, etc.)" },
+            "duration": { "type": ["number", "null"], "default": null, "description": "Default duration in minutes" },
+            "distance": { "type": ["number", "null"], "default": null, "description": "Default distance" },
+            "distanceUnit": { "type": ["string", "null"], "default": null, "description": "Distance unit (miles, km)" },
+            "description": { "type": "string", "default": "", "description": "Default description" },
+            "people": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Default people" }
+          },
+          "required": ["type"]
+        }
       }
     }
   }

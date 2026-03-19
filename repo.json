@@ -1,0 +1,6 @@
+{
+  "name": "openclaw-vitals-logger",
+  "description": "OpenClaw plugin that automatically detects and logs physical activities from chat messages",
+  "homepage": "https://github.com/Zaytas",
+  "private": false
+}

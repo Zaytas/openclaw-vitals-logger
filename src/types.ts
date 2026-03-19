@@ -12,6 +12,7 @@ export interface VitalsLoggerConfig {
   preGate: PreGateConfig;
   rateLimiting: RateLimitConfig;
   debug: DebugConfig;
+  presets: PresetsMap;
 }
 
 export interface ExtractionConfig {
@@ -55,7 +56,18 @@ export interface DebugConfig {
   logExtractions: boolean;
   logSkips: boolean;
 }
+// ─── Activity Presets ───
 
+export interface ActivityPreset {
+  type: string;
+  duration: number | null;
+  distance: number | null;
+  distanceUnit: string | null;
+  description: string;
+  people: string[];
+}
+
+export type PresetsMap = Record<string, ActivityPreset>;
 // ─── Activity Data ───
 
 export interface Activity {

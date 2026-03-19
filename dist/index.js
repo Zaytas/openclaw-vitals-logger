@@ -1,8 +1,8 @@
-import { createLogger, TtlCache, messageFingerprint, extractLastUserMessage, getTodayDate, resolvePath, } from './utils.js';
-import { scoreMessage, getDefaultPreGateConfig } from './pre-gate.js';
-import { loadPendingState, consumePendingCandidate } from './dedup.js';
-import { appendActivity } from './logger.js';
-import { buildLoggedContext } from './formatter.js';
+import { createLogger, TtlCache, messageFingerprint, extractLastUserMessage, generateActivityId, getTodayDate, resolvePath, } from './utils.js';
+import { scoreMessage, getDefaultPreGateConfig, matchPreset } from './pre-gate.js';
+import { isDuplicate, loadPendingState, addPendingCandidate, consumePendingCandidate } from './dedup.js';
+import { appendActivity, getRecentActivities } from './logger.js';
+import { buildLoggedContext, buildDuplicateContext } from './formatter.js';
 const DEFAULT_CONFIG = {
     enabled: true,
     channels: ['signal'],
@@ -39,6 +39,7 @@ const DEFAULT_CONFIG = {
         logExtractions: false,
         logSkips: false,
     },
+    presets: {},
 };
 function mergeConfig(userConfig) {
     if (!userConfig)
@@ -52,6 +53,7 @@ function mergeConfig(userConfig) {
         preGate: { ...DEFAULT_CONFIG.preGate, ...userConfig.preGate },
         rateLimiting: { ...DEFAULT_CONFIG.rateLimiting, ...userConfig.rateLimiting },
         debug: { ...DEFAULT_CONFIG.debug, ...userConfig.debug },
+        presets: { ...DEFAULT_CONFIG.presets, ...userConfig.presets },
     };
 }
 function resolveSessionId(ctx) {
@@ -126,6 +128,51 @@ export default function register(api) {
                 if (config.debug.logSkips)
                     log.info('Skip: already processed (idempotency)');
                 return undefined;
+            }
+            // ── Preset check (runs before pre-gate) ──
+            if (Object.keys(config.presets).length > 0) {
+                const presetMatch = matchPreset(userMessage, config.presets);
+                if (presetMatch) {
+                    processedCache.set(fingerprint, true);
+                    const today = getTodayDate(config.timezone);
+                    const activity = {
+                        id: generateActivityId(),
+                        date: today,
+                        time: null,
+                        type: presetMatch.preset.type,
+                        duration: presetMatch.preset.duration,
+                        distance: presetMatch.preset.distance,
+                        distanceUnit: presetMatch.preset.distanceUnit,
+                        description: presetMatch.preset.description,
+                        people: [...presetMatch.preset.people],
+                        source: channel || 'unknown',
+                        stravaUrl: null,
+                        stravaData: null,
+                    };
+                    // Dedup check
+                    if (config.dedup.enabled) {
+                        const recent = getRecentActivities(config.dataFile, config.dedup.windowDays, log);
+                        const dup = isDuplicate(activity, recent, config.dedup);
+                        if (dup) {
+                            if (config.dedup.confirmDuplicates) {
+                                addPendingCandidate(pendingFile, {
+                                    activity,
+                                    matchedExisting: dup,
+                                    timestamp: Date.now(),
+                                    sessionId,
+                                }, config.dedup, log);
+                                return { appendSystemContext: buildDuplicateContext(activity, dup) };
+                            }
+                            log.info(`Preset "${presetMatch.key}" skipped — duplicate detected`);
+                            return undefined;
+                        }
+                    }
+                    const success = await appendActivity(config.dataFile, activity, log);
+                    if (success && config.confirmation.enabled) {
+                        return { appendSystemContext: buildLoggedContext(activity) };
+                    }
+                    return undefined;
+                }
             }
             // Check for pending duplicate confirmation first
             if (config.dedup.enabled && config.dedup.confirmDuplicates) {

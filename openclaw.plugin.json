@@ -1,4 +1,5 @@
 {
+  "id": "vitals-logger",
   "name": "vitals-logger",
   "version": "1.1.0",
   "description": "Automatically detects and logs physical activities from chat messages to a JSON file",

@@ -1,10 +1,13 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { homedir } from 'node:os';
 const PREFIX = '[vitals-logger]';
-export function generateActivityId() {
-    const timestamp = Date.now().toString(36);
-    const random = Math.random().toString(36).substring(2, 6);
-    return `act-${timestamp}-${random}`;
+/**
+ * Generate activity ID: act-YYYYMMDD-{type}-{hash4}
+ */
+export function generateActivityId(date, type) {
+    const dateCompact = date.replace(/-/g, '');
+    const hash4 = randomBytes(2).toString('hex'); // 4 hex chars
+    return `act-${dateCompact}-${type}-${hash4}`;
 }
 export function getTodayDate(timezone) {
     try {
@@ -20,6 +23,24 @@ export function getTodayDate(timezone) {
         return new Date().toISOString().slice(0, 10);
     }
 }
+export function getYesterdayDate(timezone) {
+    try {
+        const d = new Date();
+        d.setDate(d.getDate() - 1);
+        const formatter = new Intl.DateTimeFormat('en-CA', {
+            timeZone: timezone,
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+        });
+        return formatter.format(d);
+    }
+    catch {
+        const d = new Date();
+        d.setDate(d.getDate() - 1);
+        return d.toISOString().slice(0, 10);
+    }
+}
 export function messageFingerprint(sessionId, message) {
     return createHash('sha256')
         .update(`${sessionId}:${message}`)
@@ -33,29 +54,6 @@ export function extractLastUserMessage(messages) {
         }
     }
     return undefined;
-}
-export function findLastAssistantMessage(messages) {
-    for (let i = messages.length - 1; i >= 0; i--) {
-        if (messages[i].role === 'assistant' && typeof messages[i].content === 'string') {
-            return messages[i].content;
-        }
-    }
-    return undefined;
-}
-/**
- * Parse a ```vitals-extract``` code fence from assistant text.
- */
-export function parseVitalsExtractBlock(text) {
-    const regex = /```vitals-extract\s*\n([\s\S]*?)\n\s*```/;
-    const match = regex.exec(text);
-    if (!match)
-        return undefined;
-    try {
-        return JSON.parse(match[1]);
-    }
-    catch {
-        return undefined;
-    }
 }
 export class TtlCache {
     defaultTtlMs;

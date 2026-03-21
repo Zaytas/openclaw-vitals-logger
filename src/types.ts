@@ -13,10 +13,12 @@ export interface VitalsLoggerConfig {
   rateLimiting: RateLimitConfig;
   debug: DebugConfig;
   presets: PresetsMap;
+  activityDefaults: ActivityDefaultsMap;
 }
 
+/** Kept for backward compat — timeout no longer used in v2 but field stays */
 export interface ExtractionConfig {
-  timeout: number; // TTL for pending extractions in ms
+  timeout: number;
 }
 
 export interface DedupConfig {
@@ -66,6 +68,18 @@ export interface ActivityPreset {
 
 export type PresetsMap = Record<string, ActivityPreset>;
 
+// ─── Activity Defaults ───
+
+export interface ActivityDefaultValues {
+  distance?: number;
+  distanceUnit?: string;
+  duration?: number;
+  people?: string[];
+  description?: string;
+}
+
+export type ActivityDefaultsMap = Record<string, ActivityDefaultValues>;
+
 // ─── Activity Data ───
 
 export interface Activity {
@@ -90,20 +104,27 @@ export interface VitalsData {
   [key: string]: unknown;
 }
 
-export interface ExtractionResult {
-  detected: boolean;
-  activity?: {
-    type: string;
-    duration: number | null;
-    distance: number | null;
-    distanceUnit: string | null;
-    date: string | null;
-    time: string | null;
-    description: string;
-    people: string[];
-    stravaUrl: string | null;
-  };
+// ─── Extraction (v2 — regex-based) ───
+
+export interface ExtractedActivity {
+  type: string;
+  duration: number | null;
+  distance: number | null;
+  distanceUnit: string | null;
+  date: string | null;
+  time: string | null;
+  description: string;
+  people: string[];
 }
+
+export interface ExtractionResult {
+  success: boolean;
+  activity?: ExtractedActivity;
+  /** Fields we couldn't extract — used for "ask user" prompt */
+  missing?: string[];
+}
+
+// ─── Dedup (v2 — simplified, no pending state) ───
 
 export interface PendingCandidate {
   activity: Activity;
@@ -115,6 +136,8 @@ export interface PendingCandidate {
 export interface PendingState {
   candidates: PendingCandidate[];
 }
+
+// ─── Plugin API ───
 
 export interface PluginApi {
   on(event: string, handler: (event: Record<string, unknown>, ctx: Record<string, unknown>) => unknown): void;

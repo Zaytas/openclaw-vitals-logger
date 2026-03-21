@@ -1,7 +1,7 @@
 {
   "id": "vitals-logger",
   "name": "vitals-logger",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "description": "Automatically detects and logs physical activities from chat messages to a JSON file",
   "main": "dist/index.js",
   "hooks": ["before_prompt_build"],
@@ -181,6 +181,38 @@
             "default": false,
             "description": "Log skipped messages with reasons"
           }
+        }
+      },
+      "activityDefaults": {
+        "type": "object",
+        "default": {},
+        "description": "Per-activity-type default values. Keys are activity types (walking, cycling, etc.). Missing extracted fields are filled from these defaults.",
+        "additionalProperties": {
+          "type": "object",
+          "properties": {
+            "distance": {
+              "type": "number",
+              "description": "Default distance"
+            },
+            "distanceUnit": {
+              "type": "string",
+              "description": "Default distance unit (miles, km)"
+            },
+            "duration": {
+              "type": "number",
+              "description": "Default duration in minutes"
+            },
+            "people": {
+              "type": "array",
+              "items": {"type": "string"},
+              "description": "Default people involved"
+            },
+            "description": {
+              "type": "string",
+              "description": "Default description"
+            }
+          },
+          "additionalProperties": false
         }
       },
       "presets": {

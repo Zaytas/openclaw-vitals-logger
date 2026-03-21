@@ -11,7 +11,9 @@ export interface VitalsLoggerConfig {
     rateLimiting: RateLimitConfig;
     debug: DebugConfig;
     presets: PresetsMap;
+    activityDefaults: ActivityDefaultsMap;
 }
+/** Kept for backward compat — timeout no longer used in v2 but field stays */
 export interface ExtractionConfig {
     timeout: number;
 }
@@ -53,6 +55,14 @@ export interface ActivityPreset {
     people: string[];
 }
 export type PresetsMap = Record<string, ActivityPreset>;
+export interface ActivityDefaultValues {
+    distance?: number;
+    distanceUnit?: string;
+    duration?: number;
+    people?: string[];
+    description?: string;
+}
+export type ActivityDefaultsMap = Record<string, ActivityDefaultValues>;
 export interface Activity {
     id: string;
     date: string;
@@ -73,19 +83,21 @@ export interface VitalsData {
     goals: unknown[];
     [key: string]: unknown;
 }
+export interface ExtractedActivity {
+    type: string;
+    duration: number | null;
+    distance: number | null;
+    distanceUnit: string | null;
+    date: string | null;
+    time: string | null;
+    description: string;
+    people: string[];
+}
 export interface ExtractionResult {
-    detected: boolean;
-    activity?: {
-        type: string;
-        duration: number | null;
-        distance: number | null;
-        distanceUnit: string | null;
-        date: string | null;
-        time: string | null;
-        description: string;
-        people: string[];
-        stravaUrl: string | null;
-    };
+    success: boolean;
+    activity?: ExtractedActivity;
+    /** Fields we couldn't extract — used for "ask user" prompt */
+    missing?: string[];
 }
 export interface PendingCandidate {
     activity: Activity;

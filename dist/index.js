@@ -1,9 +1,9 @@
-import { createLogger, TtlCache, messageFingerprint, extractLastUserMessage, findLastAssistantMessage, parseVitalsExtractBlock, generateActivityId, getTodayDate, resolvePath, } from './utils.js';
+import { createLogger, TtlCache, messageFingerprint, extractLastUserMessage, generateActivityId, getTodayDate, } from './utils.js';
 import { scoreMessage, getDefaultPreGateConfig, matchPreset } from './pre-gate.js';
-import { validateExtractionResult } from './extractor.js';
-import { isDuplicate, loadPendingState, addPendingCandidate, consumePendingCandidate } from './dedup.js';
+import { extractActivityFromMessage } from './extractor.js';
+import { isDuplicate } from './dedup.js';
 import { appendActivity, getRecentActivities } from './logger.js';
-import { buildLoggedContext, buildDuplicateContext } from './formatter.js';
+import { buildLoggedContext, buildDuplicateContext, buildAmbiguousContext } from './formatter.js';
 const DEFAULT_CONFIG = {
     enabled: true,
     channels: ['signal'],
@@ -38,6 +38,7 @@ const DEFAULT_CONFIG = {
         logSkips: false,
     },
     presets: {},
+    activityDefaults: {},
 };
 function mergeConfig(userConfig) {
     if (!userConfig)
@@ -52,6 +53,7 @@ function mergeConfig(userConfig) {
         rateLimiting: { ...DEFAULT_CONFIG.rateLimiting, ...userConfig.rateLimiting },
         debug: { ...DEFAULT_CONFIG.debug, ...userConfig.debug },
         presets: { ...DEFAULT_CONFIG.presets, ...userConfig.presets },
+        activityDefaults: { ...DEFAULT_CONFIG.activityDefaults, ...userConfig.activityDefaults },
     };
 }
 function resolveSessionId(ctx) {
@@ -63,24 +65,6 @@ function resolveSessionId(ctx) {
 }
 function resolveChannel(ctx) {
     return ctx.channel || ctx.session?.channel || undefined;
-}
-function isConfirmation(message) {
-    const lower = message.toLowerCase().trim();
-    const confirmPatterns = [
-        'yes', 'yeah', 'yep', 'yup', 'sure', 'ok', 'okay',
-        'log it', 'go ahead', 'confirm', 'do it', 'please log',
-        'y', 'affirmative',
-    ];
-    return confirmPatterns.some(p => lower === p || lower.startsWith(p + ' ') || lower.startsWith(p + ',') || lower.startsWith(p + '.'));
-}
-function isRejection(message) {
-    const lower = message.toLowerCase().trim();
-    const rejectPatterns = [
-        'no', 'nope', 'nah', "don't", 'dont', 'skip',
-        'cancel', 'never mind', 'nevermind', 'n',
-        "don't log", 'dont log', 'skip it', 'no thanks',
-    ];
-    return rejectPatterns.some(p => lower === p || lower.startsWith(p + ' ') || lower.startsWith(p + ',') || lower.startsWith(p + '.'));
 }
 function isSubagentSession(ctx) {
     if (ctx.isSubagent === true)
@@ -102,39 +86,36 @@ export default function register(api) {
         log.info('Plugin disabled');
         return;
     }
-    // Idempotency cache — prevents double-logging on prompt rebuilds
+    // Idempotency cache — prevents double-processing on prompt rebuilds
     const processedCache = new TtlCache(30000);
     // Rate limit cache — per-channel, set only AFTER positive detection
     const rateLimitCache = new TtlCache(config.rateLimiting.cooldownMs);
-    // Pending extractions — tracks sessions awaiting agent extraction response
-    const pendingExtractions = new TtlCache(config.extraction.timeout);
-    const pendingFile = resolvePath(config.dataFile) + '.pending.json';
-    log.info(`Registered — channels: [${config.channels.join(', ')}], data: ${config.dataFile}`);
+    log.info(`Registered v2 — channels: [${config.channels.join(', ')}], data: ${config.dataFile}`);
     api.on('before_prompt_build', async (_event, ctx) => {
         try {
             const event = _event;
             const hookCtx = ctx;
-            // ── Skip subagents ──
+            // ── 1. Skip subagents ──
             if (isSubagentSession(hookCtx)) {
                 if (config.debug.logSkips)
                     log.info('Skip: subagent session');
                 return undefined;
             }
-            // ── Channel filter — strict when configured ──
+            // ── 2. Channel filter ──
             const channel = resolveChannel(hookCtx);
             if (config.channels.length > 0) {
                 if (!channel) {
                     if (config.debug.logSkips)
-                        log.info('Skip: no channel info, channels filter is configured');
+                        log.info('Skip: no channel info');
                     return undefined;
                 }
                 if (!config.channels.includes(channel)) {
                     if (config.debug.logSkips)
-                        log.info(`Skip: channel ${channel} not in ${config.channels.join(',')}`);
+                        log.info(`Skip: channel ${channel} not in [${config.channels.join(',')}]`);
                     return undefined;
                 }
             }
-            // ── Extract messages ──
+            // ── 3. Get last user message ──
             const messages = event.messages;
             if (!messages || messages.length === 0) {
                 if (config.debug.logSkips)
@@ -148,78 +129,21 @@ export default function register(api) {
                 return undefined;
             }
             const sessionId = resolveSessionId(hookCtx);
-            // ── Idempotency check ──
+            // ── 4. Idempotency check ──
             const fingerprint = messageFingerprint(sessionId, userMessage);
             if (processedCache.has(fingerprint)) {
                 if (config.debug.logSkips)
                     log.info('Skip: already processed (idempotency)');
                 return undefined;
             }
-            // ── Check for completed extraction from agent's last reply ──
-            if (pendingExtractions.has(sessionId)) {
-                const lastAssistant = findLastAssistantMessage(messages);
-                if (lastAssistant) {
-                    const extractionData = parseVitalsExtractBlock(lastAssistant);
-                    if (extractionData) {
-                        const pendingInfo = pendingExtractions.get(sessionId);
-                        pendingExtractions.delete(sessionId);
-                        processedCache.set(fingerprint, true);
-                        const validated = validateExtractionResult(extractionData, log);
-                        if (validated && validated.detected && validated.activity) {
-                            const today = getTodayDate(config.timezone);
-                            const activity = {
-                                id: generateActivityId(),
-                                date: validated.activity.date || today,
-                                time: validated.activity.time,
-                                type: validated.activity.type,
-                                duration: validated.activity.duration,
-                                distance: validated.activity.distance,
-                                distanceUnit: validated.activity.distanceUnit,
-                                description: validated.activity.description,
-                                people: [...validated.activity.people],
-                                source: pendingInfo?.channel || channel || 'unknown',
-                                stravaUrl: validated.activity.stravaUrl,
-                                stravaData: null,
-                            };
-                            // Dedup
-                            if (config.dedup.enabled) {
-                                const recent = getRecentActivities(config.dataFile, config.dedup.windowDays, log);
-                                const dup = isDuplicate(activity, recent, config.dedup);
-                                if (dup) {
-                                    if (config.dedup.confirmDuplicates) {
-                                        addPendingCandidate(pendingFile, {
-                                            activity,
-                                            matchedExisting: dup,
-                                            timestamp: Date.now(),
-                                            sessionId,
-                                        }, config.dedup, log);
-                                        return { appendSystemContext: buildDuplicateContext(activity, dup) };
-                                    }
-                                    log.info('Extraction skipped — duplicate');
-                                    return undefined;
-                                }
-                            }
-                            const success = await appendActivity(config.dataFile, activity, log);
-                            if (success) {
-                                if (config.debug.logExtractions)
-                                    log.info(`Extracted and logged: ${activity.type}`);
-                                // Agent already said "✅ Logged: ..." — no need to inject again
-                                return undefined;
-                            }
-                        }
-                    }
-                }
-                // If no extraction found, clear pending (expired or agent didn't include it)
-                pendingExtractions.delete(sessionId);
-            }
-            // ── Preset check (runs before pre-gate) ──
+            processedCache.set(fingerprint, true);
+            // ── 5. Preset check (runs before pre-gate) ──
             if (Object.keys(config.presets).length > 0) {
                 const presetMatch = matchPreset(userMessage, config.presets);
                 if (presetMatch) {
-                    processedCache.set(fingerprint, true);
                     const today = getTodayDate(config.timezone);
                     const activity = {
-                        id: generateActivityId(),
+                        id: generateActivityId(today, presetMatch.preset.type),
                         date: today,
                         time: null,
                         type: presetMatch.preset.type,
@@ -237,16 +161,10 @@ export default function register(api) {
                         const recent = getRecentActivities(config.dataFile, config.dedup.windowDays, log);
                         const dup = isDuplicate(activity, recent, config.dedup);
                         if (dup) {
+                            log.info(`Preset "${presetMatch.key}" — duplicate detected`);
                             if (config.dedup.confirmDuplicates) {
-                                addPendingCandidate(pendingFile, {
-                                    activity,
-                                    matchedExisting: dup,
-                                    timestamp: Date.now(),
-                                    sessionId,
-                                }, config.dedup, log);
                                 return { appendSystemContext: buildDuplicateContext(activity, dup) };
                             }
-                            log.info(`Preset "${presetMatch.key}" skipped — duplicate`);
                             return undefined;
                         }
                     }
@@ -257,85 +175,78 @@ export default function register(api) {
                     return undefined;
                 }
             }
-            // ── Pending duplicate confirmation check ──
-            if (config.dedup.enabled && config.dedup.confirmDuplicates) {
-                const pending = loadPendingState(pendingFile, log);
-                const hasPending = pending.candidates.some(c => c.sessionId === sessionId);
-                if (hasPending) {
-                    if (isConfirmation(userMessage)) {
-                        const candidate = consumePendingCandidate(pendingFile, sessionId, config.dedup, log);
-                        if (candidate) {
-                            processedCache.set(fingerprint, true);
-                            const success = await appendActivity(config.dataFile, candidate.activity, log);
-                            if (success) {
-                                return { appendSystemContext: buildLoggedContext(candidate.activity) };
-                            }
-                        }
-                        return undefined;
-                    }
-                    if (isRejection(userMessage)) {
-                        consumePendingCandidate(pendingFile, sessionId, config.dedup, log);
-                        processedCache.set(fingerprint, true);
-                        return { appendSystemContext: '[Vitals Logger] User declined to log the duplicate activity. Acknowledged.' };
-                    }
-                    // Not a confirmation or rejection — let message flow through normal pipeline
-                }
-            }
-            // ── Pre-gate scoring ──
+            // ── 6. Pre-gate scoring ──
             const gateResult = scoreMessage(userMessage, config.preGate);
             if (!gateResult.pass) {
                 if (config.debug.logDetections) {
                     log.info(`Pre-gate fail (score=${gateResult.score}): ${gateResult.reasons.join(', ')}`);
                 }
-                processedCache.set(fingerprint, true);
                 return undefined;
             }
             if (config.debug.logDetections) {
                 log.info(`Pre-gate pass (score=${gateResult.score}): ${gateResult.reasons.join(', ')}`);
             }
-            // ── Rate limiting (AFTER positive detection) ──
+            // ── 7. Rate limiting (after positive detection) ──
             if (config.rateLimiting.enabled) {
                 const rlKey = `detect:${channel || 'default'}`;
                 if (rateLimitCache.has(rlKey)) {
                     if (config.debug.logSkips)
                         log.info('Skip: rate limited');
-                    processedCache.set(fingerprint, true);
                     return undefined;
                 }
                 rateLimitCache.set(rlKey, true);
             }
-            // ── Mark as processed ──
-            processedCache.set(fingerprint, true);
-            // ── Build extraction instruction for the agent ──
-            const today = getTodayDate(config.timezone);
-            // Track pending extraction
-            pendingExtractions.set(sessionId, { channel: channel || 'unknown' });
-            const extractionInstruction = [
-                `[Vitals Logger] A physical activity was detected in the user's message (score: ${gateResult.score}).`,
-                `Extract the activity details and include this JSON block in your response (inside a code fence tagged vitals-extract):`,
-                '',
-                '```vitals-extract',
-                JSON.stringify({
-                    detected: true,
-                    activity: {
-                        type: `<one of: ${config.activityTypes.join(', ')}>`,
-                        duration: '<minutes as number, or null>',
-                        distance: '<number, or null>',
-                        distanceUnit: '<miles|km|null>',
-                        date: today,
-                        time: '<time string or null>',
-                        description: '<brief summary>',
-                        people: ['<names or empty array>'],
-                        stravaUrl: '<URL or null>',
-                    },
-                }, null, 2),
-                '```',
-                '',
-                `Replace placeholder values with actual data from the user's message. Use null for unknown fields.`,
-                `If this is NOT actually a physical activity, set "detected" to false.`,
-                `After the JSON block, briefly confirm to the user: "✅ Logged: [summary]"`,
-            ].join('\n');
-            return { appendSystemContext: extractionInstruction };
+            // ── 8. Extract activity from user message (regex) ──
+            const extractResult = extractActivityFromMessage(userMessage, config.timezone, log, Object.keys(config.activityDefaults).length > 0 ? config.activityDefaults : undefined);
+            if (!extractResult.success || !extractResult.activity) {
+                // Extraction failed — activity detected by pre-gate but regex couldn't parse it
+                if (config.debug.logExtractions) {
+                    log.info(`Extraction failed: missing ${extractResult.missing?.join(', ') || 'unknown'}`);
+                }
+                return { appendSystemContext: buildAmbiguousContext(extractResult.missing || ['activity details']) };
+            }
+            const extracted = extractResult.activity;
+            // ── 9. Build Activity object ──
+            const activity = {
+                id: generateActivityId(extracted.date || getTodayDate(config.timezone), extracted.type),
+                date: extracted.date || getTodayDate(config.timezone),
+                time: extracted.time,
+                type: extracted.type,
+                duration: extracted.duration,
+                distance: extracted.distance,
+                distanceUnit: extracted.distanceUnit,
+                description: extracted.description,
+                people: [...extracted.people],
+                source: channel || 'unknown',
+                stravaUrl: null,
+                stravaData: null,
+            };
+            // ── 10. Dedup check ──
+            if (config.dedup.enabled) {
+                const recent = getRecentActivities(config.dataFile, config.dedup.windowDays, log);
+                const dup = isDuplicate(activity, recent, config.dedup);
+                if (dup) {
+                    log.info('Duplicate detected — skipping auto-log');
+                    if (config.dedup.confirmDuplicates) {
+                        return { appendSystemContext: buildDuplicateContext(activity, dup) };
+                    }
+                    return undefined;
+                }
+            }
+            // ── 11. Persist ──
+            const success = await appendActivity(config.dataFile, activity, log);
+            if (!success) {
+                log.error('Failed to persist activity');
+                return undefined;
+            }
+            if (config.debug.logExtractions) {
+                log.info(`Logged: ${activity.type} (${activity.id})`);
+            }
+            // ── 12. Inject acknowledgment for agent ──
+            if (config.confirmation.enabled) {
+                return { appendSystemContext: buildLoggedContext(activity) };
+            }
+            return undefined;
         }
         catch (err) {
             // FAIL OPEN — never crash the gateway

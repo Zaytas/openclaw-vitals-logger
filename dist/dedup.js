@@ -1,5 +1,3 @@
-import { readFileSync, writeFileSync, unlinkSync, existsSync } from 'node:fs';
-import { safeJsonParse } from './utils.js';
 function normalizeDistanceUnit(unit) {
     if (!unit)
         return 'mi';
@@ -21,6 +19,10 @@ function descriptionsMatch(a, b) {
     const union = new Set([...wordsA, ...wordsB]);
     return union.size > 0 && intersection.length / union.size > 0.6;
 }
+/**
+ * Check if a new activity is a duplicate of any existing activity.
+ * Returns the matched existing activity, or undefined if no duplicate.
+ */
 export function isDuplicate(newActivity, existingActivities, config) {
     for (const existing of existingActivities) {
         if (newActivity.date !== existing.date)
@@ -59,58 +61,5 @@ export function isDuplicate(newActivity, existingActivities, config) {
         return existing;
     }
     return undefined;
-}
-export function loadPendingState(pendingFile, log) {
-    try {
-        if (!existsSync(pendingFile))
-            return { candidates: [] };
-        const raw = readFileSync(pendingFile, 'utf-8');
-        const state = safeJsonParse(raw);
-        if (!state || !Array.isArray(state.candidates))
-            return { candidates: [] };
-        return state;
-    }
-    catch (err) {
-        log.warn(`Failed to load pending state: ${err}`);
-        return { candidates: [] };
-    }
-}
-export function savePendingState(pendingFile, state, log) {
-    try {
-        writeFileSync(pendingFile, JSON.stringify(state, null, 2), 'utf-8');
-    }
-    catch (err) {
-        log.error(`Failed to save pending state: ${err}`);
-    }
-}
-export function addPendingCandidate(pendingFile, candidate, config, log) {
-    const state = loadPendingState(pendingFile, log);
-    const expireMs = config.pendingExpireMinutes * 60 * 1000;
-    const now = Date.now();
-    state.candidates = state.candidates.filter(c => now - c.timestamp < expireMs);
-    state.candidates.push(candidate);
-    savePendingState(pendingFile, state, log);
-}
-export function consumePendingCandidate(pendingFile, sessionId, config, log) {
-    const state = loadPendingState(pendingFile, log);
-    const expireMs = config.pendingExpireMinutes * 60 * 1000;
-    const now = Date.now();
-    state.candidates = state.candidates.filter(c => now - c.timestamp < expireMs);
-    const idx = state.candidates.findIndex(c => c.sessionId === sessionId);
-    if (idx === -1)
-        return undefined;
-    const candidate = state.candidates[idx];
-    state.candidates.splice(idx, 1);
-    savePendingState(pendingFile, state, log);
-    return candidate;
-}
-export function clearPendingState(pendingFile, log) {
-    try {
-        if (existsSync(pendingFile))
-            unlinkSync(pendingFile);
-    }
-    catch (err) {
-        log.warn(`Failed to clear pending state: ${err}`);
-    }
 }
 //# sourceMappingURL=dedup.js.map

@@ -28,7 +28,7 @@ const DEFAULT_NEGATIVE_PATTERNS = [
 ];
 const SCORE_WEIGHTS = {
     activityNoun: 3,
-    pastTenseVerb: 2,
+    pastTenseVerb: 3,
     durationMention: 2,
     distanceMention: 2,
     firstPerson: 1,
@@ -81,10 +81,12 @@ export function scoreMessage(message, config) {
             break;
         }
     }
+    // First-person patterns — includes past tense verbs
     const firstPersonPatterns = [
-        /\bi\s+(walk|bike|rode|ran|swim|hike|lift|jog|went|did)/i,
-        /\bwe\s+(walk|bike|rode|ran|swim|hike|lift|jog|went|did)/i,
+        /\bi\s+(walk|walked|bike|biked|rode|ran|run|swim|swam|hike|hiked|lift|lifted|jog|jogged|went|did)/i,
+        /\bwe\s+(walk|walked|bike|biked|rode|ran|run|swim|swam|hike|hiked|lift|lifted|jog|jogged|went|did)/i,
         /\bmy\s+(walk|bike|ride|run|swim|hike|workout)/i,
+        /\bjust\s+(walked|biked|ran|hiked|swam|jogged|rucked)/i,
     ];
     for (const pattern of firstPersonPatterns) {
         if (pattern.test(message)) {

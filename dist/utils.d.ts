@@ -1,18 +1,14 @@
-export declare function generateActivityId(): string;
+/**
+ * Generate activity ID: act-YYYYMMDD-{type}-{hash4}
+ */
+export declare function generateActivityId(date: string, type: string): string;
 export declare function getTodayDate(timezone: string): string;
+export declare function getYesterdayDate(timezone: string): string;
 export declare function messageFingerprint(sessionId: string, message: string): string;
 export declare function extractLastUserMessage(messages: Array<{
     role: string;
     content: string;
 }>): string | undefined;
-export declare function findLastAssistantMessage(messages: Array<{
-    role: string;
-    content: string;
-}>): string | undefined;
-/**
- * Parse a ```vitals-extract``` code fence from assistant text.
- */
-export declare function parseVitalsExtractBlock(text: string): unknown | undefined;
 export declare class TtlCache<T> {
     private defaultTtlMs;
     private cache;
